@@ -1,0 +1,4 @@
+fix image banding
+check every possible layout element and implement styling for it
+add progress tracker
+remove temporary html file
