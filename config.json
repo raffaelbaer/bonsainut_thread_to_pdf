@@ -7,5 +7,9 @@
     "toSave": [
         "https://www.bonsainut.com/threads/shohin-black-pine-from-seed.30414/",
         "https://www.bonsainut.com/threads/hand-me-down-jm.19086/"
-    ]
+    ],
+
+    "chromeExecutable": {
+        "value": "C:/Program Files/Google/Chrome/Application/chrome.exe"
+    }
 }

@@ -24,6 +24,7 @@ from selenium.webdriver.support import expected_conditions as EC
 def validateConfigurationFile(config):    
     username = config['configuration']['username'].strip()
     password = config['configuration']['password'].strip()
+    chromeExecutable = config['chromeExecutable']['value'].strip()
     
     toSave = config['toSave']
     
@@ -32,6 +33,12 @@ def validateConfigurationFile(config):
     
     if password is None or not isinstance(password, str):
         raise Exception('Password specified in configuration file not valid, please correct.')
+    
+    if chromeExecutable is None or not isinstance(chromeExecutable, str):
+        raise Exception('Chrome Executable in configuration file not valid, please correct.')
+    else:
+        if not os.path.exists(chromeExecutable):
+            raise Exception('Path to Chrome Executable in configuration file doesnt exist, please correct.')
     
     if len(toSave) == 0:
         raise Exception('No urls to save where specified in the configuration file.')
@@ -42,7 +49,7 @@ def validateConfigurationFile(config):
             
             toSaveUrls.append(url.strip())
         
-    return (username, password)
+    return (username, password, chromeExecutable)
 
 def initializeChromeDriver():
     chromeOptions = Options()
@@ -221,7 +228,7 @@ try:
             config = False
 
     toSaveUrls = []
-    username, password = validateConfigurationFile(config)
+    username, password, chromeExecutable = validateConfigurationFile(config)
     
     driver = initializeChromeDriver()
     
@@ -511,7 +518,7 @@ try:
         async def generateThreadPdf(htmlPath, pdfOutputPathFile, pdfOutputFileName):
             browser = await launch(
                 headless=True,
-                executablePath=r'C:\Program Files\Google\Chrome\Application\chrome.exe'
+                executablePath=chromeExecutable
                 )
             page = await browser.newPage()
             await page.goto(f'file://{os.path.abspath(htmlPath)}')
