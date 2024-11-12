@@ -9,7 +9,7 @@ Images are supplied in their own subfolder (/images)
 2. Have the following non standard modules installed in python [view required modules](requirements.txt)
 3. Have the Repository downloaded to your pc
 4. Setup the [config file](config.json):
-    - with your credentials for bonsainut.com (needed in order for the images to be accessible in good resolution, they wont be used anywhere but to login to the website and be able to access images)
+    - input your credentials for bonsainut.com, into the fields username & password (these needed in order for the images & embeds in threads to be accessible, they wont be used anywhere but to login to the website and then be able to acess the images).
     - in the toSave section, input the Threads you want to download, seperate them by comma.
 5. run the main.py file, and let the magic happen.
 
