@@ -1,10 +1,11 @@
 {
     "configuration": {
-        "username": "your bonsainut username or email",
-        "password": "your bonsainut password"
+        "username": "your bonsainut.com username or email here",
+        "password": "your bonsainut.com password here"
     },
     
     "toSave": [
-        "https://www.bonsainut.com/threads/hgs-ceramics.64982/"
+        "https://www.bonsainut.com/threads/shohin-black-pine-from-seed.30414/",
+        "https://www.bonsainut.com/threads/hand-me-down-jm.19086/"
     ]
 }

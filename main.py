@@ -6,8 +6,10 @@ import re
 import json
 import asyncio
 import requests
+import shutil
 from PIL import Image
 from pyppeteer import launch
+from bs4 import BeautifulSoup
 from concurrent.futures import ThreadPoolExecutor
 
 from selenium import webdriver
@@ -36,7 +38,7 @@ def validateConfigurationFile(config):
     else:
         for url in toSave:
             if not isinstance(url, str) or not 'www.bonsainut.com' in url:
-                raise Exception(f'Invalid url ({url}) specified in configuration file.')
+                raise Exception(f'Invalid thread url ({url}) specified in configuration file.')
             
             toSaveUrls.append(url.strip())
         
@@ -53,6 +55,13 @@ def initializeChromeDriver():
     chromeOptions.add_argument("--no-sandbox")
     chromeOptions.add_argument("--disable-dev-shm-usage")
     chromeOptions.add_argument('--headless')
+    chromeOptions.add_argument("--log-level=3")
+    
+    chromeOptions.set_capability('goog:loggingPrefs', {
+        'driver': 'OFF',
+        'browser': 'OFF',
+        'performance': 'OFF'
+    })
     
     return webdriver.Chrome(options=chromeOptions)
 
@@ -64,8 +73,9 @@ def consentCookies(driver):
         pass
 
 def generatePostElementHtml(username, datetime, postId, content, attachmentsList, xf_sessionCookie, savePath, compressedImagesPath): 
-    def download_image(attachment):
+    def download_image(attachment, operationFor):
         name, link = attachment
+        
         try:
             cookies = {
                 "xf_session": xf_sessionCookie,
@@ -92,39 +102,47 @@ def generatePostElementHtml(username, datetime, postId, content, attachmentsList
                     imageData.seek(0)
                     
                     with Image.open(imageData) as img:
-                        new_width = int(img.width * 30 / 100)
-                        new_height = int(img.height * 30 / 100)
-                        
-                        img = img.resize((new_width, new_height), Image.LANCZOS)
+                        if (operationFor == 'attachment'):
+                            original_width, original_height = img.size
+                            target_width = 400
+
+                            if original_width > target_width:
+                                aspect_ratio = original_height / original_width
+                                target_height = int(target_width * aspect_ratio)
+
+                                img = img.resize((target_width, target_height), Image.LANCZOS)
                         
                         with open(compressedImagesFilePath, 'wb') as optimized_file:
                             img.save(optimized_file, quality=quality, optimize=True)
                                 
-                downloadAndOptimizeImages(20)
+                downloadAndOptimizeImages(30)
 
                 link = f'images/compressed/{postId.strip("#")}-{name}'
-                return f'''
-                    <div class="attachment" style="background-image: url('{link}')">
-                        <h3>{name}</h3>
-                    </div>
-                '''
+                
+                if operationFor == 'attachment':
+                    return f'''
+                        <div class="attachment" style="background-image: url('{link}')">
+                            <h3>{name}</h3>
+                        </div>
+                    '''
+                    
         except Exception as e:
             print(f"Couldnt download Image {name}: {e}")
             return None
 
-    def download_attachments(attachmentsList):
+    def download_attachments(attachmentsList, operationFor):
         attachmentsHtml = ''
         
         with ThreadPoolExecutor() as executor:
-            results = executor.map(download_image, attachmentsList)
+            results = executor.map(lambda attachment: download_image(attachment, operationFor), attachmentsList)
         
         for result in results:
             if result:
                 attachmentsHtml += result
     
-        return attachmentsHtml
+        return attachmentsHtml 
     
-    attachmentsHtml = download_attachments(attachmentsList)
+    attachmentsHtml = download_attachments(attachmentsList, 'attachment')
     
     if len(attachmentsList) > 0:
         attachmentsHtml = f'''
@@ -135,21 +153,65 @@ def generatePostElementHtml(username, datetime, postId, content, attachmentsList
         '''
     else:
         attachmentsHtml = ''
-       
-       
+        
+    #getting embeded images, and also saving them in images folder        
+    
+    def download_embeds(embeddedImagesList, operationFor):
+        with ThreadPoolExecutor() as executor:
+            executor.map(lambda embed: download_image(embed, operationFor), embeddedImagesList)
+    
+    soup = BeautifulSoup(content, 'lxml')
+    embeddedImages = soup.select('.bbImageWrapper > img')
+    
+    if len(embeddedImages) > 0:
+        embeddedImagesList = []
+
+        for img in embeddedImages:
+            name = img['title']
+            src = img['src']
+
+            embeddedImagesList.append((name, src))
+
+            img['src'] = f'images/compressed/{postId.strip("#")}-{name}'
+
+        download_embeds(embeddedImagesList, 'embed')
+        
+        imageWrappers = soup.select('.bbImageWrapper')
+        
+        for wrapper in imageWrappers:
+            h3 = soup.new_tag('h3')
+            h3.string = f'{name}'
+            
+            wrapper.append(h3)
+    
+    if len(attachmentsList) > 0 or len(embeddedImages) > 0:
+        postClassname = 'post'
+    elif len(attachmentsList) == 0 and len(embeddedImages) == 0:
+        postClassname = 'post noAttachments'
+    
+    content = str(soup)
+    
     return f'''
-    <section class="post">
+    <section class="{postClassname}">
         <div class="postinfo">
             <h3 class="postid">{postId}</h3>
-            <h3 class="username">{username}</h3>
+            <h3 class="username">@{username}</h3>
             <h4 class="datetime">{datetime}</h3>
         </div>
         <div class="postcontent">
-            <p>{content}</p>
+            <div>{content}</div>
             {attachmentsHtml}
         </div>
     </section>
     '''
+
+def clearThenLogConsole(msg):
+    if os.name == 'nt':
+        os.system('cls')
+        print(msg)
+    else:
+        os.system('clear')
+        print(msg)
 
 try:
     with open('config.json', 'r') as file:
@@ -164,6 +226,8 @@ try:
     driver = initializeChromeDriver()
     
     driver.get('https://www.bonsainut.com/login')
+    
+    clearThenLogConsole('validated configuration file, starting process')
         
     consentCookies(driver)
     
@@ -182,6 +246,8 @@ try:
     except (TimeoutException, NoSuchElementException):
         pass
     
+    #extracting session cookie, in order to make downloading images possible, @raffaelbaer
+    
     try:
         xf_sessionCookie = driver.get_cookie('xf_session')
         
@@ -191,9 +257,12 @@ try:
         if not xf_sessionCookie:
             raise Exception('No xf_sessionCookie found, needed for downloading images and embeds properly!')
     except Exception as e:
-        raise Exception(e)
+        raise
     
-    for threadUrl in toSaveUrls:
+    for index, threadUrl in enumerate(toSaveUrls):
+        defaultPrintStatement = f'Thread {index+1}/{len(toSaveUrls)}:'
+        clearThenLogConsole(f'{defaultPrintStatement} starting download process')
+        
         postsHtml = []
                 
         driver.get(threadUrl)
@@ -231,7 +300,8 @@ try:
         imagesOutputPath = f'output/{pdfOutputPathName}/images'
         compressedImagesPath = f'output/{pdfOutputPathName}/images/compressed'
         
-        for page in range(pagesLength):
+        for index, page in enumerate(range(pagesLength)):
+            clearThenLogConsole(f'{defaultPrintStatement} getting Page {index+1}/{pagesLength}')
             posts = WebDriverWait(driver, 10).until(EC.presence_of_all_elements_located((By.CSS_SELECTOR, 'article.message--post .message-inner')))
             
             for post in posts:
@@ -269,6 +339,8 @@ try:
                 navigationNext = WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.CSS_SELECTOR, '.pageNav .pageNav-jump.pageNav-jump--next')))
                 navigationNext.click()
         
+        clearThenLogConsole(f'{defaultPrintStatement} finished scraping, now writing to pdf, finishing download of thread soon')
+        
         postsHtml = '\n'.join([f'{post}' for post in postsHtml])
         
         threadHtml = f'''
@@ -305,8 +377,12 @@ try:
                         border: 1px solid #d9d9d9;
                         box-shadow: 2px 2px 10px 3px #fdfdfd;
                         border-radius: 10px;
-                        margin-top: 2rem;
+                        margin-top: 1rem;
                         padding: 1rem;
+                    }}
+                    
+                    .post.noAttachments {{
+                        page-break-inside: avoid;
                     }}
                     
                     .postinfo {{
@@ -351,7 +427,7 @@ try:
                     .attachments {{
                         display: grid;
                         grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-                        gap: 1rem;
+                        gap: 0.5rem;
                         margin-top: 0.75rem;
                     }}
                 
@@ -363,21 +439,64 @@ try:
                         background-repeat: no-repeat;
                         display: flex;
                         align-items: flex-end;
+                        
                     }}
                     
                     .attachment > h3 {{
-                        background: linear-gradient(360deg, #101010, transparent);
+                        background: #10101094;
                         width: 100%;
                         border: none;
                         border-radius: 0px 0px 10px 10px;
                         padding: 0.75rem;
-                        padding-top: 1.5rem;
                         color: white;
+                    }}
+                    
+                    blockquote.bbCodeBlock {{
+                        padding: 0.5rem;
+                        border: 2px solid #13c564;
+                        border-radius: 5px;
+                        background: #f9f9f9;
+                        margin-bottom: 0.5rem;
+                    }}
+                    
+                    blockquote.bbCodeBlock .bbCodeBlock-title {{
+                        font-size: 1.1em;
+                        font-weight: 600;
+                        margin-bottom: 0.5rem;
+                    }}
+                    
+                    blockquote.bbCodeBlock .bbCodeBlock-expandLink {{
+                        display: none;
+                    }}
+                    
+                    .postcontent .bbWrapper .bbImageWrapper > img {{
+                        max-width: 500px;
+                        height: auto;
+                        border-radius: 10px;
+                    }}
+                    
+                    .postcontent .bbWrapper .bbImageWrapper {{
+                        margin-bottom: 0.5rem;
+                        position: relative;
+                        width: fit-content;
+                        display: flex;
+                    }}
+                    
+                    .postcontent .bbWrapper .bbImageWrapper > h3 {{
+                        background: #10101094;
+                        width: 100%;
+                        border: none;
+                        border-radius: 0px 0px 10px 10px;
+                        padding: 0.75rem;
+                        color: white;
+                        position: absolute;
+                        bottom: 0;
+                        word-break: break-all;
                     }}
             </style>
             <body>
             <header>
-                <h1 class="mainheading">Thread Name: {threadName}</h1>
+                <h1 class="mainheading">{threadName}</h1>
                 <h3 class="subheading">By user: @{threadCreator}</h2>
                 <h3 class="subheading">Created at: {threadTime}</h2>
                 <h3 class="subheading">ThreadId: {threadId}</h2>
@@ -416,25 +535,14 @@ try:
             })
             await browser.close()
          
-        temporaryHtmlFilePath = f'{pdfOutputPath}/temp.html'
+        htmlFilePath = f'{pdfOutputPath}/{pdfOutputFileName}.html'
             
-        with open (temporaryHtmlFilePath, 'w', encoding='utf-8') as file:
+        with open (htmlFilePath, 'w', encoding='utf-8') as file:
             file.write(threadHtml)
             
-        asyncio.get_event_loop().run_until_complete(generateThreadPdf(f'{pdfOutputPath}/temp.html', f'{pdfOutputPath}/{pdfOutputFileName}', pdfOutputFileName))
+        asyncio.get_event_loop().run_until_complete(generateThreadPdf(f'{htmlFilePath}', f'{pdfOutputPath}/{pdfOutputFileName}', pdfOutputFileName))
         
-        #removing temporary files and directories
-        os.remove(temporaryHtmlFilePath)
-        
-        for root, dirs, files in os.walk(compressedImagesPath, topdown=False):
-            for file in files:
-                os.remove(os.path.join(root, file))
-            for dir in dirs:
-                os.rmdir(os.path.join(root, dir))
-                
-            os.rmdir(compressedImagesPath)
-            
-        #show progress
+        clearThenLogConsole(f'{defaultPrintStatement} finished download of thread!')
 
 except Exception as e:
     print(e)

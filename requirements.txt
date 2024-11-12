@@ -2,3 +2,4 @@ selenium==4.17.2
 pyppeteer==2.0.0
 requests==2.31.0
 Pillow==10.1.0
+beautifulsoup4==4.12.3
