@@ -5,11 +5,15 @@
     },
     
     "toSave": [
-        "https://www.bonsainut.com/threads/shohin-black-pine-from-seed.30414/",
-        "https://www.bonsainut.com/threads/hand-me-down-jm.19086/"
+        "https://www.bonsainut.com/threads/legacy-japanese-white-pine.63202/",
+        "https://www.bonsainut.com/threads/the-2010-bonsainut-maple-project.3285/"
     ],
 
     "chromeExecutable": {
         "value": "C:/Program Files/Google/Chrome/Application/chrome.exe"
+    },
+
+    "printPdf": {
+        "value": false
     }
 }

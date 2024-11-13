@@ -15,6 +15,16 @@ Images are supplied in their own subfolder => /images
     - input your credentials for bonsainut.com, into the fields username & password (these needed in order for the images & embeds in threads to be accessible, they wont be used anywhere but to login to the website and then be able to acess the images).
     - in the toSave section, input the Threads you want to download, seperate them by comma.
     - supply the path to your chrome browser in the configuration under chromeExecutable (ps: for most users (windows), this path will probably be: C:/Program Files/Google/Chrome/Application/chrome.exe)
+    - supply wether you want to output a pdf (a html file will always be generated) in the printPdf section:
+        - This option is either set to True or False, however setting it to False will improve performance of the programm DRASTICALLY also the layout and design of the pdf is worse than just viewing the thread as html. The default is set to False, meaning only a html file will get printed
+            
+            What benefits does it have leaving the printPdf Option to False?
+                - Much faster generation of the Threads
+                - Much smaller File size with HTML compared to the pdf
+                - optimized layout of the HTML file.
+                - On large Threads (with many images and more than 5 pages), the process of creating a pdf can take a couple of minutes
+                - On the html file you have the benefit of beeing able to click on images you want to view enlarged, they will load from the local /images file folder inside the Threads folder in full resolution.
+
 7. run the main.py file, and let the magic happen.
 
-The process of creating the pdfs and downloading the images can take a bite of time, however in your console output, reasonable breakpoints will be output, for you to track progress better.
+In the output folder you can see a example for a Thread I've created with it, you can download it if you want and see the results for yourself!

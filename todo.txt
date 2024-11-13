@@ -1,2 +1,2 @@
 check every possible layout element and implement styling for it
-fix image banding
+on pdf: fix wrapping and optimize filesize (somehow)

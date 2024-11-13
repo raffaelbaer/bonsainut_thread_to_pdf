@@ -4,9 +4,10 @@ import os
 import io
 import re
 import json
+import shutil
+import hashlib
 import asyncio
 import requests
-import shutil
 from PIL import Image
 from pyppeteer import launch
 from bs4 import BeautifulSoup
@@ -25,6 +26,7 @@ def validateConfigurationFile(config):
     username = config['configuration']['username'].strip()
     password = config['configuration']['password'].strip()
     chromeExecutable = config['chromeExecutable']['value'].strip()
+    printPdf = config['printPdf']['value']
     
     toSave = config['toSave']
     
@@ -39,6 +41,9 @@ def validateConfigurationFile(config):
     else:
         if not os.path.exists(chromeExecutable):
             raise Exception('Path to Chrome Executable in configuration file doesnt exist, please correct.')
+        
+    if printPdf is None or not isinstance(printPdf, bool):
+        raise Exception('printPdf option in configuration file not valid, please correct.')
     
     if len(toSave) == 0:
         raise Exception('No urls to save where specified in the configuration file.')
@@ -49,7 +54,7 @@ def validateConfigurationFile(config):
             
             toSaveUrls.append(url.strip())
         
-    return (username, password, chromeExecutable)
+    return (username, password, chromeExecutable, printPdf)
 
 def initializeChromeDriver():
     chromeOptions = Options()
@@ -80,8 +85,23 @@ def consentCookies(driver):
         pass
 
 def generatePostElementHtml(username, datetime, postId, content, attachmentsList, xf_sessionCookie, savePath, compressedImagesPath): 
+    def generateIdentifier(input):        
+        hash_object = hashlib.sha256(input.encode())
+        hex_digest = hash_object.hexdigest()
+        return hex_digest[:6]
+    
     def download_image(attachment, operationFor):
         name, link = attachment
+        
+        #handling images with same name...
+
+        filePathName = f'{savePath}/{postId.strip("#")}-{name}'
+        randomIdentifier = generateIdentifier(link)
+            
+        localLink = f'images/compressed/{postId.strip("#")}-{randomIdentifier}-{name}'
+        localLink_uncompressed = f'images/{postId.strip("#")}-{randomIdentifier}-{name}'
+        filePathName = f'{savePath}/{postId.strip("#")}-{randomIdentifier}-{name}'
+        name = f'{randomIdentifier}-{name}'  
         
         try:
             cookies = {
@@ -93,7 +113,6 @@ def generatePostElementHtml(username, datetime, postId, content, attachmentsList
             if response.status_code == 403:
                 raise Exception(f"Could not load image {name} from {link}, status code 403.")
             elif response.status_code == 200:
-                filePathName = f'{savePath}/{postId.strip("#")}-{name}'               
                 os.makedirs(os.path.dirname(filePathName), exist_ok=True)
                 
                 imageData = io.BytesIO()
@@ -101,7 +120,7 @@ def generatePostElementHtml(username, datetime, postId, content, attachmentsList
                 with open(filePathName, 'wb') as file:
                     for chunk in response.iter_content(chunk_size=8192):
                         file.write(chunk)
-                        imageData.write(chunk)
+                        imageData.write(chunk)  
                 
                 def downloadAndOptimizeImages(quality):
                     compressedImagesFilePath = f'{compressedImagesPath}/{postId.strip("#")}-{name}'
@@ -123,14 +142,12 @@ def generatePostElementHtml(username, datetime, postId, content, attachmentsList
                             img.save(optimized_file, quality=quality, optimize=True)
                                 
                 downloadAndOptimizeImages(30)
-
-                link = f'images/compressed/{postId.strip("#")}-{name}'
                 
                 if operationFor == 'attachment':
                     return f'''
-                        <div class="attachment" style="background-image: url('{link}')">
+                        <a class="attachment" style="background-image: url('{localLink}')" href="{localLink_uncompressed}">
                             <h3>{name}</h3>
-                        </div>
+                        </a>
                     '''
                     
         except Exception as e:
@@ -161,14 +178,14 @@ def generatePostElementHtml(username, datetime, postId, content, attachmentsList
     else:
         attachmentsHtml = ''
         
-    #getting embeded images, and also saving them in images folder        
+    #getting embeded images, and also saving them in images folder
     
     def download_embeds(embeddedImagesList, operationFor):
         with ThreadPoolExecutor() as executor:
             executor.map(lambda embed: download_image(embed, operationFor), embeddedImagesList)
     
     soup = BeautifulSoup(content, 'lxml')
-    embeddedImages = soup.select('.bbImageWrapper > img')
+    embeddedImages = soup.select('.js-lbImage > img')
     
     if len(embeddedImages) > 0:
         embeddedImagesList = []
@@ -176,20 +193,36 @@ def generatePostElementHtml(username, datetime, postId, content, attachmentsList
         for img in embeddedImages:
             name = img['title']
             src = img['src']
+            
+            if int(img['width']) < 350:
+                img['width'] = 'auto'
+            
+            imageWrapper = img.find_parent(class_='js-lbImage')
+            
+            if imageWrapper:
+                #replacing downscaled attachments with their full resolution counterparts, by modifying uri
+                
+                if '/data/attachments/' in src:
+                    src = imageWrapper['href']
+                    
+                randomIdentifier = generateIdentifier(src)
+                img['src'] = f'images/compressed/{postId.strip("#")}-{randomIdentifier}-{name}'
+                
+                imageWrapper['href'] = f'images/{postId.strip("#")}-{randomIdentifier}-{name}'
+                
+                h3 = soup.new_tag('h3')
+                h3.string = f'{name}'
 
+                imageWrapper.append(h3)
+                
+                linkElement = soup.new_tag('a')
+                linkElement.attrs = imageWrapper.attrs
+                linkElement.extend(imageWrapper.contents)
+                imageWrapper.replace_with(linkElement)
+                
             embeddedImagesList.append((name, src))
 
-            img['src'] = f'images/compressed/{postId.strip("#")}-{name}'
-
         download_embeds(embeddedImagesList, 'embed')
-        
-        imageWrappers = soup.select('.bbImageWrapper')
-        
-        for wrapper in imageWrappers:
-            h3 = soup.new_tag('h3')
-            h3.string = f'{name}'
-            
-            wrapper.append(h3)
     
     if len(attachmentsList) > 0 or len(embeddedImages) > 0:
         postClassname = 'post'
@@ -228,7 +261,7 @@ try:
             config = False
 
     toSaveUrls = []
-    username, password, chromeExecutable = validateConfigurationFile(config)
+    username, password, chromeExecutable, printPdf = validateConfigurationFile(config)
     
     driver = initializeChromeDriver()
     
@@ -463,7 +496,7 @@ try:
                         border: 2px solid #13c564;
                         border-radius: 5px;
                         background: #f9f9f9;
-                        margin-bottom: 0.5rem;
+                        margin-block: 0.75rem;
                     }}
                     
                     blockquote.bbCodeBlock .bbCodeBlock-title {{
@@ -476,20 +509,20 @@ try:
                         display: none;
                     }}
                     
-                    .postcontent .bbWrapper .bbImageWrapper > img {{
+                    .postcontent .bbWrapper .js-lbImage > img {{
                         max-width: 500px;
                         height: auto;
                         border-radius: 10px;
                     }}
                     
-                    .postcontent .bbWrapper .bbImageWrapper {{
+                    .postcontent .bbWrapper .js-lbImage {{
                         margin-bottom: 0.5rem;
                         position: relative;
                         width: fit-content;
                         display: flex;
                     }}
                     
-                    .postcontent .bbWrapper .bbImageWrapper > h3 {{
+                    .postcontent .bbWrapper .js-lbImage > h3 {{
                         background: #10101094;
                         width: 100%;
                         border: none;
@@ -521,7 +554,7 @@ try:
                 executablePath=chromeExecutable
                 )
             page = await browser.newPage()
-            await page.goto(f'file://{os.path.abspath(htmlPath)}')
+            await page.goto(f'file://{os.path.abspath(htmlPath)}', {'timeout': 0})
             await page.evaluate(f'document.title = "{pdfOutputFileName}"')
             await page.evaluate('''
                 document.querySelectorAll('img[loading="lazy"]').forEach(function(img) {
@@ -546,8 +579,9 @@ try:
             
         with open (htmlFilePath, 'w', encoding='utf-8') as file:
             file.write(threadHtml)
-            
-        asyncio.get_event_loop().run_until_complete(generateThreadPdf(f'{htmlFilePath}', f'{pdfOutputPath}/{pdfOutputFileName}', pdfOutputFileName))
+        
+        if printPdf == True:
+            asyncio.get_event_loop().run_until_complete(generateThreadPdf(f'{htmlFilePath}', f'{pdfOutputPath}/{pdfOutputFileName}', pdfOutputFileName))
         
         clearThenLogConsole(f'{defaultPrintStatement} finished download of thread!')
 
