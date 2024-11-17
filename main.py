@@ -227,7 +227,7 @@ def generatePostElementHtml(username, datetime, postId, content, attachmentsList
                     name = generateFileAndFolderSaveName(re.sub(r'\s+', '', name))
                     base_name, ext = os.path.splitext(name)
                     
-                    if bool(re.search(r'\d', ext)):
+                    if bool(re.search(r'\d', ext)) or not ext:
                         ext = '.jpeg'
                         name = base_name + ext
                     
