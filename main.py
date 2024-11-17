@@ -11,6 +11,7 @@ import requests
 from PIL import Image
 from pyppeteer import launch
 from bs4 import BeautifulSoup
+from urllib.parse import urlparse
 from concurrent.futures import ThreadPoolExecutor
 
 from selenium import webdriver
@@ -151,8 +152,7 @@ def generatePostElementHtml(username, datetime, postId, content, attachmentsList
                     '''
                     
         except Exception as e:
-            print(f"Couldnt download Image {name}: {e}")
-            return None
+            raise Exception(f"Couldnt download Image {name}: {e}")
 
     def download_attachments(attachmentsList, operationFor):
         attachmentsHtml = ''
@@ -186,47 +186,75 @@ def generatePostElementHtml(username, datetime, postId, content, attachmentsList
     
     soup = BeautifulSoup(content, 'lxml')
     embeddedImages = soup.select('.js-lbImage > img')
+    externalImageEmbeds = soup.select('.link.link--external > img')
     
-    if len(embeddedImages) > 0:
-        embeddedImagesList = []
+    embeddedImagesList = []
+    
+    def downloadAllEmbedsFor(embeddedImagesList, embedsElement, imageWrapperClass):
+        if len(embedsElement) > 0:
+            for img in embedsElement:
+                src = img.get('src')
 
-        for img in embeddedImages:
-            name = img['title']
-            src = img['src']
-            
-            if int(img['width']) < 350:
-                img['width'] = 'auto'
-            
-            imageWrapper = img.find_parent(class_='js-lbImage')
-            
-            if imageWrapper:
-                #replacing downscaled attachments with their full resolution counterparts, by modifying uri
-                
-                if '/data/attachments/' in src:
-                    src = imageWrapper['href']
+                if img['width'] and int(img['width']) < 350:
+                    img['width'] = 'auto'
+
+                imageWrapper = img.find_parent(class_=imageWrapperClass)
+
+                if imageWrapper:
+                    #replacing downscaled attachments with their full resolution counterparts, by modifying uri
+
+                    if '/data/attachments/' in src:
+                        src = imageWrapper.get('href')
+
+                    if 'http://' not in src and 'https://' not in src:
+                        src = img.get('data-url')
+
+                    randomIdentifier = generateIdentifier(src)
                     
-                randomIdentifier = generateIdentifier(src)
-                img['src'] = f'images/compressed/{postId.strip("#")}-{randomIdentifier}-{name}'
-                
-                imageWrapper['href'] = f'images/{postId.strip("#")}-{randomIdentifier}-{name}'
-                
-                h3 = soup.new_tag('h3')
-                h3.string = f'{name}'
+                    name = img.get('title') or img.get('alt')
+                    
+                    if not name:
+                        parsedUrl = urlparse(src)
+                        path = parsedUrl.path
+                        _, extension = os.path.splitext(path)
+                        
+                        if extension == '':
+                            raise Exception(f'No extension found for {src}')
+                        else:
+                            extension = re.sub(r'\d+|\s+', '', extension.lower())
+                            name = f'{randomIdentifier}{extension}'
+                            
+                    name = generateFileAndFolderSaveName(re.sub(r'\s+', '', name))
+                    base_name, ext = os.path.splitext(name)
+                    
+                    if bool(re.search(r'\d', ext)):
+                        ext = '.jpeg'
+                        name = base_name + ext
+                    
+                    img['src'] = f'images/compressed/{postId.strip("#")}-{randomIdentifier}-{name}'
+                    imageWrapper['href'] = f'images/{postId.strip("#")}-{randomIdentifier}-{name}'
 
-                imageWrapper.append(h3)
-                
-                linkElement = soup.new_tag('a')
-                linkElement.attrs = imageWrapper.attrs
-                linkElement.extend(imageWrapper.contents)
-                imageWrapper.replace_with(linkElement)
-                
-            embeddedImagesList.append((name, src))
+                    h3 = soup.new_tag('h3')
+                    h3.string = f'{name}'
 
-        download_embeds(embeddedImagesList, 'embed')
+                    imageWrapper.append(h3)
+
+                    linkElement = soup.new_tag('a')
+                    linkElement.attrs = imageWrapper.attrs
+                    linkElement.extend(imageWrapper.contents)
+                    imageWrapper.replace_with(linkElement)
+
+                embeddedImagesList.append((name, src))
+            
+            download_embeds(embeddedImagesList, 'embed')
+
+    downloadAllEmbedsFor(embeddedImagesList, embeddedImages, 'js-lbImage')
+    downloadAllEmbedsFor(embeddedImagesList, externalImageEmbeds, 'link--external')
+        
     
-    if len(attachmentsList) > 0 or len(embeddedImages) > 0:
+    if len(attachmentsList) > 0 or len(embeddedImages) > 0 or len(externalImageEmbeds) > 0:
         postClassname = 'post'
-    elif len(attachmentsList) == 0 and len(embeddedImages) == 0:
+    elif len(attachmentsList) == 0 and len(embeddedImages) == 0 and len(externalImageEmbeds) == 0:
         postClassname = 'post noAttachments'
     
     content = str(soup)
@@ -252,13 +280,16 @@ def clearThenLogConsole(msg):
     else:
         os.system('clear')
         print(msg)
+        
+def generateFileAndFolderSaveName(string):
+    return re.sub(r'[<>:"/\\|?*\x00-\x1F#]', '_', string)[:255].strip()
 
 try:
     with open('config.json', 'r') as file:
         try:
             config = json.load(file)
         except json.JSONDecodeError:
-            config = False
+            raise
 
     toSaveUrls = []
     username, password, chromeExecutable, printPdf = validateConfigurationFile(config)
@@ -332,7 +363,7 @@ try:
         threadId = WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.CSS_SELECTOR, 'html')))
         threadId = threadId.get_attribute('data-content-key').strip().lstrip('thread-')
         
-        outputFilename = re.sub(r'[<>:"/\\|?*]', '_', threadName.replace(' ', '_'))[:255]
+        outputFilename = generateFileAndFolderSaveName(threadName)
         pdfOutputPathName = f'Thread-{threadId}-{outputFilename}'
         pdfOutputPath = f'output/{pdfOutputPathName}'
         os.makedirs(pdfOutputPath, exist_ok=True)
@@ -489,6 +520,7 @@ try:
                         border-radius: 0px 0px 10px 10px;
                         padding: 0.75rem;
                         color: white;
+                        word-break: break-all;
                     }}
                     
                     blockquote.bbCodeBlock {{
@@ -509,20 +541,23 @@ try:
                         display: none;
                     }}
                     
-                    .postcontent .bbWrapper .js-lbImage > img {{
+                    .postcontent .bbWrapper .js-lbImage > img,
+                    .postcontent .link.link--external > img {{
                         max-width: 500px;
                         height: auto;
                         border-radius: 10px;
                     }}
                     
-                    .postcontent .bbWrapper .js-lbImage {{
+                    .postcontent .bbWrapper .js-lbImage,
+                    .postcontent .link.link--external {{
                         margin-bottom: 0.5rem;
                         position: relative;
                         width: fit-content;
                         display: flex;
                     }}
                     
-                    .postcontent .bbWrapper .js-lbImage > h3 {{
+                    .postcontent .bbWrapper .js-lbImage > h3,
+                    .postcontent .link.link--external > h3 {{
                         background: #10101094;
                         width: 100%;
                         border: none;

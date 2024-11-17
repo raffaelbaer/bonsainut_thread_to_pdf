@@ -1,2 +1,3 @@
 check every possible layout element and implement styling for it
 on pdf: fix wrapping and optimize filesize (somehow)
+fix formatting for images in threads that are beneath each other
