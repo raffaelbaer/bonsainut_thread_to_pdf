@@ -194,6 +194,9 @@ def generatePostElementHtml(username, datetime, postId, content, attachmentsList
         if len(embedsElement) > 0:
             for img in embedsElement:
                 src = img.get('src')
+                
+                if '/proxy' in src:
+                    src = f'https://www.bonsainut.com/{img.get("src")}'
 
                 if img['width'] and int(img['width']) < 350:
                     img['width'] = 'auto'
@@ -206,23 +209,12 @@ def generatePostElementHtml(username, datetime, postId, content, attachmentsList
                     if '/data/attachments/' in src:
                         src = imageWrapper.get('href')
 
-                    if 'http://' not in src and 'https://' not in src:
-                        src = img.get('data-url')
-
                     randomIdentifier = generateIdentifier(src)
                     
                     name = img.get('title') or img.get('alt')
                     
                     if not name:
-                        parsedUrl = urlparse(src)
-                        path = parsedUrl.path
-                        _, extension = os.path.splitext(path)
-                        
-                        if extension == '':
-                            raise Exception(f'No extension found for {src}')
-                        else:
-                            extension = re.sub(r'\d+|\s+', '', extension.lower())
-                            name = f'{randomIdentifier}{extension}'
+                            name = f'{randomIdentifier}.jpeg'
                             
                     name = generateFileAndFolderSaveName(re.sub(r'\s+', '', name))
                     base_name, ext = os.path.splitext(name)
