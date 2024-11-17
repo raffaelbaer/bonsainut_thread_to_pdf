@@ -19,11 +19,11 @@ Images are supplied in their own subfolder => /images
         - This option is either set to True or False, however setting it to False will improve performance of the programm DRASTICALLY also the layout and design of the pdf is worse than just viewing the thread as html. The default is set to False, meaning only a html file will get printed
             
             What benefits does it have leaving the printPdf Option to False?
-                - Much faster generation of the Threads
-                - Much smaller File size with HTML compared to the pdf
-                - optimized layout of the HTML file.
-                - On large Threads (with many images and more than 5 pages), the process of creating a pdf can take a couple of minutes
-                - On the html file you have the benefit of beeing able to click on images you want to view enlarged, they will load from the local /images file folder inside the Threads folder in full resolution.
+                1. Much faster generation of the Threads
+                2. Much smaller File size with HTML compared to the pdf
+                3. optimized layout of the HTML file.
+                4. On large Threads (with many images and more than 5 pages), the process of creating a pdf can take a couple of minutes
+                5. On the html file you have the benefit of beeing able to click on images you want to view enlarged, they will load from the local /images file folder inside the Threads folder in full resolution.
 
 7. run the main.py file, and let the magic happen.
 
