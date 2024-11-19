@@ -8,10 +8,10 @@ import shutil
 import hashlib
 import asyncio
 import requests
-from PIL import Image
 from pyppeteer import launch
 from bs4 import BeautifulSoup
 from urllib.parse import urlparse
+from PIL import Image, UnidentifiedImageError
 from concurrent.futures import ThreadPoolExecutor
 
 from selenium import webdriver
@@ -85,12 +85,7 @@ def consentCookies(driver):
     except (TimeoutException, NoSuchElementException) as e:
         pass
 
-def generatePostElementHtml(username, datetime, postId, content, attachmentsList, xf_sessionCookie, savePath, compressedImagesPath): 
-    def generateIdentifier(input):        
-        hash_object = hashlib.sha256(input.encode())
-        hex_digest = hash_object.hexdigest()
-        return hex_digest[:6]
-    
+def generatePostElementHtml(username, datetime, postId, content, attachmentsList, xf_sessionCookie, savePath, compressedImagesPath):  
     def download_image(attachment, operationFor):
         name, link = attachment
         
@@ -99,10 +94,9 @@ def generatePostElementHtml(username, datetime, postId, content, attachmentsList
         filePathName = f'{savePath}/{postId.strip("#")}-{name}'
         randomIdentifier = generateIdentifier(link)
             
-        localLink = f'images/compressed/{postId.strip("#")}-{randomIdentifier}-{name}'
-        localLink_uncompressed = f'images/{postId.strip("#")}-{randomIdentifier}-{name}'
-        filePathName = f'{savePath}/{postId.strip("#")}-{randomIdentifier}-{name}'
-        name = f'{randomIdentifier}-{name}'  
+        localLink = f'images/compressed/{postId.strip("#")}-{name}'
+        localLink_uncompressed = f'images/{postId.strip("#")}-{name}'
+        filePathName = f'{savePath}/{postId.strip("#")}-{name}'
         
         try:
             cookies = {
@@ -124,24 +118,37 @@ def generatePostElementHtml(username, datetime, postId, content, attachmentsList
                         imageData.write(chunk)  
                 
                 def downloadAndOptimizeImages(quality):
-                    compressedImagesFilePath = f'{compressedImagesPath}/{postId.strip("#")}-{name}'
-                    os.makedirs(os.path.dirname(compressedImagesFilePath), exist_ok=True)
                     imageData.seek(0)
                     
-                    with Image.open(imageData) as img:
-                        if (operationFor == 'attachment'):
-                            original_width, original_height = img.size
-                            target_width = 400
+                    validImageExtensions = ['.png', '.jpeg', '.jpg', '.gif', '.bmp', '.tiff', '.webp', '.heif', '.heic', '.svg', '.ico']
+                    base_name, ext = os.path.splitext(name)
+                    
+                    #if imageData is not a image, dont run below code (optimizing images)
+                    
+                    if ext.lower() not in validImageExtensions:
+                        print("image doesnt have valid extension")
+                        return
+                    
+                    try: 
+                        with Image.open(imageData) as img:                        
+                            compressedImagesFilePath = f'{compressedImagesPath}/{postId.strip("#")}-{name}'
+                            os.makedirs(os.path.dirname(compressedImagesFilePath), exist_ok=True)
 
-                            if original_width > target_width:
-                                aspect_ratio = original_height / original_width
-                                target_height = int(target_width * aspect_ratio)
+                            if (operationFor == 'attachment'):
+                                original_width, original_height = img.size
+                                target_width = 400
 
-                                img = img.resize((target_width, target_height), Image.LANCZOS)
-                        
-                        with open(compressedImagesFilePath, 'wb') as optimized_file:
-                            img.save(optimized_file, quality=quality, optimize=True)
-                                
+                                if original_width > target_width:
+                                    aspect_ratio = original_height / original_width
+                                    target_height = int(target_width * aspect_ratio)
+
+                                    img = img.resize((target_width, target_height), Image.LANCZOS)
+
+                            with open(compressedImagesFilePath, 'wb') as optimized_file:
+                                img.save(optimized_file, quality=quality, optimize=True)
+                    except (UnidentifiedImageError) as e:
+                        pass
+                         
                 downloadAndOptimizeImages(30)
                 
                 if operationFor == 'attachment':
@@ -214,17 +221,21 @@ def generatePostElementHtml(username, datetime, postId, content, attachmentsList
                     name = img.get('title') or img.get('alt')
                     
                     if not name:
-                            name = f'{randomIdentifier}.jpeg'
-                            
-                    name = generateFileAndFolderSaveName(re.sub(r'\s+', '', name))
-                    base_name, ext = os.path.splitext(name)
+                        name =  f'{randomIdentifier}.jpeg'
+                    else:
+                        name = generateFileAndFolderSaveName(re.sub(r'\s+', '', name))
+                        base_name, ext = os.path.splitext(name)
+
+                        if bool(re.search(r'\d', ext)):
+                            ext = '.jpeg'
+
+                        if ext:                        
+                            name = f'{randomIdentifier}{ext}'
+                        else:
+                            name =  f'{randomIdentifier}.jpeg'
                     
-                    if bool(re.search(r'\d', ext)) or not ext:
-                        ext = '.jpeg'
-                        name = base_name + ext
-                    
-                    img['src'] = f'images/compressed/{postId.strip("#")}-{randomIdentifier}-{name}'
-                    imageWrapper['href'] = f'images/{postId.strip("#")}-{randomIdentifier}-{name}'
+                    img['src'] = f'images/compressed/{postId.strip("#")}-{name}'
+                    imageWrapper['href'] = f'images/{postId.strip("#")}-{name}'
 
                     h3 = soup.new_tag('h3')
                     h3.string = f'{name}'
@@ -236,13 +247,13 @@ def generatePostElementHtml(username, datetime, postId, content, attachmentsList
                     linkElement.extend(imageWrapper.contents)
                     imageWrapper.replace_with(linkElement)
 
-                embeddedImagesList.append((name, src))
+                if name and src:
+                    embeddedImagesList.append((name, src))
             
             download_embeds(embeddedImagesList, 'embed')
 
     downloadAllEmbedsFor(embeddedImagesList, embeddedImages, 'js-lbImage')
     downloadAllEmbedsFor(embeddedImagesList, externalImageEmbeds, 'link--external')
-        
     
     if len(attachmentsList) > 0 or len(embeddedImages) > 0 or len(externalImageEmbeds) > 0:
         postClassname = 'post'
@@ -273,8 +284,13 @@ def clearThenLogConsole(msg):
         os.system('clear')
         print(msg)
         
+def generateIdentifier(input):        
+    hash_object = hashlib.sha256(input.encode())
+    hex_digest = hash_object.hexdigest()
+    return hex_digest[:6]
+        
 def generateFileAndFolderSaveName(string):
-    return re.sub(r'[<>:"/\\|?*\x00-\x1F#]', '_', string)[:255].strip()
+    return re.sub(r'[_\s]+', '-', re.sub(r'[<>:"/\\|?*\x00-\x1F#]', '_', string)[:249].strip().strip('.')).lower()
 
 try:
     with open('config.json', 'r') as file:
@@ -355,9 +371,10 @@ try:
         threadId = WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.CSS_SELECTOR, 'html')))
         threadId = threadId.get_attribute('data-content-key').strip().lstrip('thread-')
         
-        outputFilename = generateFileAndFolderSaveName(threadName)
-        pdfOutputPathName = f'Thread-{threadId}-{outputFilename}'
+        outputFilename = generateFileAndFolderSaveName(threadName)        
+        pdfOutputPathName = f'Thread-{threadId}-{outputFilename}'        
         pdfOutputPath = f'output/{pdfOutputPathName}'
+        
         os.makedirs(pdfOutputPath, exist_ok=True)
         
         imagesOutputPath = f'output/{pdfOutputPathName}/images'
@@ -390,12 +407,29 @@ try:
                         attachmentLink = attachmentLink.get_attribute("href").strip()
                         
                         attachmentName = WebDriverWait(attachment, 0).until(EC.presence_of_element_located((By.CSS_SELECTOR, 'section.message-attachments .attachmentList > li > div.file-content .file-info > .file-name')))
-                        attachmentName = attachmentName.text.strip()
+                        attachmentName = attachmentName.text
                         
-                        attachmentsList.append((attachmentName, attachmentLink))
+                        randomIdentifier = generateIdentifier(attachmentLink)
+                            
+                        if not attachmentName:
+                            attachmentName =  f'{randomIdentifier}.jpeg'
+                        else:
+                            attachmentName = generateFileAndFolderSaveName(re.sub(r'\s+', '', attachmentName))
+                            base_name, ext = os.path.splitext(attachmentName)
+
+                            if bool(re.search(r'\d', ext)):
+                                ext = '.jpeg'
+
+                            if ext:                        
+                                attachmentName = f'{randomIdentifier}{ext}'
+                            else:
+                                attachmentName =  f'{randomIdentifier}.jpeg'
+                            
+                        if attachmentName and attachmentLink:
+                            attachmentsList.append((attachmentName, attachmentLink))
                     
                     postsHtml.append(generatePostElementHtml(username, datetime, postId, content, attachmentsList, xf_sessionCookie, imagesOutputPath, compressedImagesPath))
-                except (TimeoutException, NoSuchElementException) as e:
+                except (TimeoutException, NoSuchElementException) as e:                    
                     postsHtml.append(generatePostElementHtml(username, datetime, postId, content, attachmentsList, xf_sessionCookie, imagesOutputPath, compressedImagesPath))
             
             if (pagesLength > 1 and page != pagesLength-1):
@@ -602,7 +636,7 @@ try:
             })
             await browser.close()
          
-        htmlFilePath = f'{pdfOutputPath}/{pdfOutputFileName}.html'
+        htmlFilePath = f'{pdfOutputPath}/Thread-{threadId}.html'
             
         with open (htmlFilePath, 'w', encoding='utf-8') as file:
             file.write(threadHtml)
